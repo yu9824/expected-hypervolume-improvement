@@ -4,7 +4,7 @@ from typing import List, Tuple
 import numpy as np
 from scipy.stats import norm
 from sklearn.utils import check_array
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator, RegressorMixin, check_is_fitted
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Kernel
 
@@ -14,7 +14,6 @@ from utils import create_vw
 class MultiGaussianProcessRegressor(BaseEstimator, RegressorMixin):
     def __init__(
         self,
-        n_models: int = 10,
         kernel: Optional[Kernel] = None,
         *,
         alpha: Union[float, np.ndarray] = 1e-10,
@@ -27,7 +26,6 @@ class MultiGaussianProcessRegressor(BaseEstimator, RegressorMixin):
         random_state: Optional[Union[np.random.RandomState, int]] = None,
     ) -> None:
         super().__init__()
-        self.n_models = n_models
         self.kernel = kernel
         self.alpha = alpha
         self.optimizer = optimizer
@@ -35,25 +33,26 @@ class MultiGaussianProcessRegressor(BaseEstimator, RegressorMixin):
         self.normalize_y = normalize_y
         self.copy_X_train = copy_X_train
         self.random_state = random_state
-        self.__models = []
-        for _ in range(n_models):
-            self.__models.append(
-                GaussianProcessRegressor(
-                    kernel=kernel,
-                    alpha=alpha,
-                    optimizer=optimizer,
-                    n_restarts_optimizer=n_restarts_optimizer,
-                    normalize_y=normalize_y,
-                    copy_X_train=copy_X_train,
-                    random_state=random_state,
-                )
-            )
 
     def fit(self, X: List[List[float]], y: List[List[float]]):
         X: np.ndarray = check_array(X, ensure_2d=True)
         y: np.ndarray = check_array(y, ensure_2d=True)
-        assert y.shape[1] == self.n_models
-        for _model, _y in zip(self.models, y.transpose()):
+
+        self.n_models_ = y.shape[1]
+        self.__models_: List[GaussianProcessRegressor] = []
+        for _ in range(self.n_models_):
+            self.__models_.append(
+                GaussianProcessRegressor(
+                    kernel=self.kernel,
+                    alpha=self.alpha,
+                    optimizer=self.optimizer,
+                    n_restarts_optimizer=self.n_restarts_optimizer,
+                    normalize_y=self.normalize_y,
+                    copy_X_train=self.copy_X_train,
+                    random_state=self.random_state,
+                )
+            )
+        for _model, _y in zip(self.__models_, y.transpose()):
             _model.fit(X, _y)
         return self
 
@@ -72,6 +71,7 @@ class MultiGaussianProcessRegressor(BaseEstimator, RegressorMixin):
         X: List[List[float]],
         return_std: bool = False,
     ) -> Any:
+        check_is_fitted(self, "n_models_")
         mean = []
         if return_std:
             std = []
@@ -89,7 +89,7 @@ class MultiGaussianProcessRegressor(BaseEstimator, RegressorMixin):
 
     @property
     def models(self) -> List[GaussianProcessRegressor]:
-        return self.__models
+        return self.__models_
 
 
 class ExpectedHypervolumeImprovement:
@@ -144,7 +144,7 @@ if __name__ == "__main__":
         X, y, y2, test_size=0.2, random_state=0
     )
     expected_hypervolume_improvement = ExpectedHypervolumeImprovement(
-        MultiGaussianProcessRegressor(2),
+        MultiGaussianProcessRegressor(),
         X_train,
         np.vstack([y_train, y2_train]).transpose(),
     )
